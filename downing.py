@@ -97,9 +97,8 @@ proxy = {
     "http": "127.0.0.1:10809",
     "https": "127.0.0.1:10809",
 }
-def app():
+def app(url):
     global data_queue,down_queue,data_empty,down_empty
-    url="https://18comic.org/album/146417"
     albumid = re.search(r'/album/(\d+)',url).group(1)
     #print(albumid)
     try:
@@ -163,4 +162,4 @@ def app():
 
 
 if __name__ == '__main__':
-    app()
+    app("https://18comic.org/album/146417")
