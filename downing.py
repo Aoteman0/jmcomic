@@ -6,25 +6,24 @@ import os,re
 from multiprocessing import Queue
 import threading
 from threading import Lock
-from myran import Myran
 from lxml import etree
 import math
 import execjs
 from PIL import Image
-from Include.useragents.myran import Myran
+from myran import Myran
+import get_jm_url
 
 os.environ['EXECJS_RUNTIME'] = "JScript"
 
 class Data(threading.Thread):
-    def __init__(self,book_name,albumid,downqueue):
+    def __init__(self,thread_name,book_name,albumid):
         super().__init__()
+        self.thread_name = thread_name
         self.book_name=book_name
         self.albumid=albumid
-        self.down_queue=downqueue
     def run(self):
-
+        print("%s开始了！" % self.thread_name)
         while not data_empty:
-            print("data线程%s开始了！" % self.getName())
             try:
                 if not data_queue.empty():
                     data = data_queue.get(False)
@@ -48,10 +47,10 @@ class Data(threading.Thread):
                 #     print("重新抛入queue：",data)
                 #     data_queue.put(data)
                 except Exception as e:
+                    print(e.__traceback__.tb_lineno,e)
                     print("重新抛入data_queue：")
                     data_queue.put(data)
-                    print(e.__traceback__.tb_lineno,e)
-            except Exception as e:
+            except:
                 pass
     def parse(self,rsp,path_photo,photoid):
         rsp_etree=etree.HTML(rsp.text)
@@ -62,21 +61,23 @@ class Data(threading.Thread):
             img_name = os.path.basename(img_url).split('.')[0]
             path_img = "%s\\%s.jpg" % (path_photo, img_name)
             #print([img_url,photoid,path_img])
-            self.down_queue.put([img_url,photoid,path_img])
+            down_queue.put([img_url,photoid,path_img])
 class Download(threading.Thread):
-    def __init__(self):
+    def __init__(self,thread_name):
         super().__init__()
+        self.thread_name = thread_name
     def run(self):
-        print("down线程%s开始了！"%self.getName())
+        print("%s开始了！"%self.thread_name)
         while not down_empty:
             try:
-                print("还剩余s张图片"%down_queue.qsize())
+                print("还剩余%s张图片"%down_queue.qsize())
                 if not down_queue.empty():
                     down = down_queue.get(False)
                 else:
                     time.sleep(3)
                     down = down_queue.get(False)
                 try:
+                    print("down",down)
                     if not os.path.exists(down[2]):
                         #scramble_id=220980 网页固定值
                         if int(down[1])>220980:#albumid>aid就使用拼接函数 否则直接下载
@@ -87,15 +88,16 @@ class Download(threading.Thread):
                             self.dowm_img(down[0],down[2])
 
                 except  Exception as e:
+                    print(e.__traceback__.tb_lineno,e)
                     print("重新抛入queue：",down)
                     down_queue.put(down)
-                    print(e.__traceback__.tb_lineno,e)
             except:
                 pass
     def dowm_img(self,url,path_img):
         # s=random.choice(list(range(3)))+1+random.random()
         # time.sleep(s)
         #print("time.sleep=%d"%s)
+        headers["User_Agent"]=myran.agents()
         response = requests.get(url,headers=headers,proxies=proxy)
         if response.status_code == 200:
             with open(path_img,"wb") as f:
@@ -109,6 +111,8 @@ class Download(threading.Thread):
         # opener = urllib.request.build_opener(httpproxy_handler)
         # urlz = urllib.request.Request(imgurl, headers={"User-Agent": myran.agents()})
         # im2 = Image.open(opener.open(urlz))
+
+        headers["User_Agent"]=myran.agents()
         response=requests.get(imgurl, headers=headers,proxies=proxy)
         if response.status_code == 200:
             im2 = Image.open(io.BytesIO(response.content))
@@ -188,27 +192,39 @@ down_empty = False
 lock = Lock()
 myran = Myran()
 headers = {
-    #'cookie': '_ga=GA1.2.1540031906.1664414186; _ga_VW05C6PGN3=GS1.1.1664789639.4.0.1664789640.59.0.0; __atuvc=14%7C39%2C9%7C40%2C1%7C41; ipcountry=US; AVS=ajmoaur97d4npbl01m57kr35m3; cover=1; shuntflag=1; guide=1; ipm5=0cd9de309e89bd6bbae94102596909b7; yuo1=%7B%22objName%22:%22nLBcY3VxeaTgP%22,%22request_id%22:0,%22zones%22:%5B%7B%22idzone%22:%223648533%22,%22here%22:%7B%7D%7D,%7B%22idzone%22:%223648533%22,%22here%22:%7B%7D%7D%5D%7D',
+    #'cookie':'ipcountry=US; AVS=4eb0s4o5ho9hfmp704ge7jtium; ipm5=bb7f6ac39cebfa37e89bd07544c549fd; cover=1; guide=1; __atuvc=12|39,31|40,5|41,0|42,4|43; __atuvs=635cabf67eff0d49003; yuo1={"objName":"hT3l8Pyn15Uf","request_id":0,"zones":[{"idzone":"2967008","here":{}},{"idzone":"2967010","here":{}},{"idzone":"2967010","here":{}},{"idzone":"3597795","sub":"70","here":{}}]}',
     #'referer': 'https://18comic.org/',
     "User_Agent": myran.agents()
 }
 proxy = {
-
+    #"http":"127.0.0.1:10809",
+    #"https":"127.0.0.1:10809"
 }
 def app(url):
-    global data_queue,down_queue,data_empty,down_empty
-    albumid = re.search(r'/album/(\d+)',url).group(1)
-    if ".vip" in url:
-        url = re.sub(r'18comic.vip','jmcomic2.moe',url)
-    referer=re.search(r'(https://\w+\.\w+)/',url).group(1)
-    print("albumid",albumid,referer,url)
     try:
-        while True:
-            response=requests.get(url=url,headers=headers,proxies=proxy)
+        global data_empty,down_empty
+
+        newurl_list=get_jm_url.app()
+        response=''
+        if newurl_list:
+            if re.findall(r'https://(.*?)/\w+/\d+/',url)[0] not in newurl_list:
+                for newurl in newurl_list:
+                    url = re.sub(re.findall(r'https://(.*?)/\w+/\d+/', url)[0], newurl, url)
+                    response = requests.get(url=url, headers=headers, proxies=proxy)
+                    break
+            else:
+                response = requests.get(url=url, headers=headers, proxies=proxy)
+        else:
+            response = requests.get(url=url, headers=headers, proxies=proxy)
+        if response:
+            albumid = re.search(r'/album/(\d+)', url).group(1)
+            referer = re.search(r'(https://\w+\.\w+)/', url).group(1)
+            print("albumid", albumid, referer, url)
             print(response.url)
             if response.status_code == 200:
-                #print(response.text)
+                print(response.status_code)
                 eth = etree.HTML(response.text)
+                #拿到所有话数
                 nums = eth.xpath("//div[@class='row']/div[6]/div[1]/div[1]/ul[contains(@class,'btn-toolbar')]/a")
                 book_name = eth.xpath("//div[@itemprop='name']/h1[@id='book-name']/text()")[0]
                 book_name = re.sub(r'[\\\/\|\(\)\~\?\.\:\：\-\*\<\>]', '', book_name)
@@ -226,40 +242,44 @@ def app(url):
                         #print(photo_name)
                         photoid=i.attrib['data-album']
                         data_queue.put((photo_name,photoid,referer+i.attrib['href']))
-                break
     except Exception as e:
         print(e.__traceback__.tb_lineno,e)
     if data_queue.qsize():
         data_queue_len  = data_queue.qsize()
         print("当前一共%s話" % data_queue_len)
-        data_list=list(range(data_queue_len if data_queue_len <= 8 else 8))
+        data_list=['data线程%s号'%s for s in list(range(1,data_queue_len if data_queue_len <= 8 else 8))]
         data_thread_list=[]
         for i in data_list:
-            data=Data(book_name,albumid,down_queue)
+            data=Data(i,book_name,albumid)
             data.start()
+            time.sleep(0.7)
             data_thread_list.append(data)
-        while down_queue.qsize()>30:
-            pass
-        down_list=list(range(30))
+        startime=time.perf_counter()
+        while True:
+            if down_queue.qsize()>100 or time.perf_counter()-startime>10:
+                break
+        print('down_queue.qsize():%s'%down_queue.qsize())
+        down_list=['down下载线程%s号'%s for s in list(range(1,40 if down_queue.qsize()>40 else down_queue.qsize()))]
         down_thread_list=[]
         for i in down_list:
-            down=Download()
+            down=Download(i)
             down.start()
+            time.sleep(0.7)
             down_thread_list.append(down)
         while not data_queue.empty():
             pass
         data_empty=True
         for thread in data_thread_list:
             thread.join()
-            print("data线程%s结束了！"%thread.getName())
+            print("%s结束了！"%thread.thread_name)
 
         while not down_queue.empty():
             pass
         down_empty=True
         for down_thread in down_thread_list:
             down_thread.join()
-            print("down线程%s结束了！"%down_thread.getName())
+            print("%s结束了！"%down_thread.thread_name)
 
 
 if __name__ == '__main__':
-    app("https://18comic.vip/album/383270/")
+    app("https://18comic.vip/album/390129/")
